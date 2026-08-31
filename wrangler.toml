@@ -1,9 +1,9 @@
-name = "temp"
+name = "temp-email-worker"
 main = "worker.js"
-compatibility_date = "2026-08-31"
+compatibility_date = "2024-01-01"
 
 kv_namespaces = [
-  { binding = "EMAIL_STORE", id = "9b1cb95398644f04be04656563862ed0" }   # ganti dengan ID asli
+  { binding = "EMAIL_STORE", id = "9b1cb95398644f04be04656563862ed0" }
 ]
 
 [vars]
