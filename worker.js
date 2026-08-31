@@ -9,7 +9,6 @@ export default {
       recipients = [message.to];
     }
 
-    // Baca raw email sebagai ArrayBuffer
     let rawBuffer;
     try {
       rawBuffer = await new Response(message.raw).arrayBuffer();
@@ -17,7 +16,6 @@ export default {
       rawBuffer = new ArrayBuffer(0);
     }
 
-    // Parse dengan PostalMime
     let parsed;
     try {
       const parser = new PostalMime();
@@ -29,7 +27,6 @@ export default {
     let text = parsed.text || '';
     let html = parsed.html || '';
 
-    // Fallback: jika keduanya kosong, gunakan raw email mentah sebagai teks
     if (!text && !html && rawBuffer.byteLength > 0) {
       try {
         text = new TextDecoder().decode(rawBuffer);
@@ -57,7 +54,7 @@ export default {
         date,
         text,
         html,
-        raw: text || html ? '' : new TextDecoder().decode(rawBuffer) // simpan raw jika perlu
+        raw: text || html ? '' : new TextDecoder().decode(rawBuffer)
       };
 
       const key = `msg:${domain}:${localPart}:${emailObject.id}`;
@@ -193,7 +190,7 @@ function getHtml() {
     .email-content { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; max-height: 400px; overflow-y: auto; }
     .email-card.open .email-content { display: block; }
     .email-content pre { white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; background: #f9fafb; padding: 10px; border-radius: 8px; }
-    .email-content iframe { width: 100%; min-height: 300px; border: 1px solid var(--border); border-radius: 8px; background: white; }
+    .email-html { max-height: 400px; overflow-y: auto; background: #f9fafb; padding: 10px; border-radius: 8px; }
     .empty-state { text-align: center; padding: 60px 20px; background: var(--card-bg); border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-secondary); }
     .badge { background: #eef2ff; color: var(--accent); padding: 2px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
     @media (max-width: 600px) {
@@ -222,7 +219,10 @@ function getHtml() {
       const statusEl = document.getElementById('status');
       statusEl.textContent = 'Memuat...';
       try {
-        const res = await fetch('/api/all-emails');
+        const res = await fetch('/api/all-emails', {
+          cache: 'no-store',
+          credentials: 'omit'
+        });
         const emails = await res.json();
         renderEmails(emails);
         statusEl.textContent = emails.length + ' email';
@@ -231,6 +231,14 @@ function getHtml() {
         statusEl.textContent = 'Error';
         console.error(err);
       }
+    }
+    function sanitizeHtml(html) {
+      // Hapus tag script beserta isinya
+      html = html.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '');
+      // Hapus atribut on* (event handler)
+      html = html.replace(/\\son\\w+="[^"]*"/gi, '');
+      html = html.replace(/\\son\\w+='[^']*'/gi, '');
+      return html;
     }
     function renderEmails(emails) {
       const listEl = document.getElementById('emailList');
@@ -241,10 +249,9 @@ function getHtml() {
       let html = '';
       emails.forEach(email => {
         const isOpen = (openEmailId === email.id) ? ' open' : '';
-        // Tentukan konten yang akan ditampilkan
         let contentHtml = '';
         if (email.html) {
-          contentHtml = '<iframe sandbox="allow-same-origin" srcdoc="' + escapeHtml(email.html) + '"></iframe>';
+          contentHtml = '<div class="email-html">' + sanitizeHtml(email.html) + '</div>';
         } else if (email.text) {
           contentHtml = '<pre>' + escapeHtml(email.text) + '</pre>';
         } else if (email.raw) {
