@@ -156,7 +156,14 @@ function getHtml() {
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
       padding: 20px;
+    }
+    main {
+      width: 100%;
       max-width: 800px;
       margin: 0 auto;
     }
@@ -180,19 +187,57 @@ function getHtml() {
     .email-card {
       background: var(--card-bg); border: 1px solid var(--border);
       border-radius: var(--radius); box-shadow: var(--shadow);
-      padding: 16px 18px; transition: all 0.2s ease; cursor: pointer;
+      padding: 16px 18px; transition: all 0.2s ease;
+      cursor: pointer;
     }
     .email-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #d1d5db; }
     .email-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
     .email-subject { font-weight: 600; font-size: 1.05rem; word-break: break-word; }
     .email-meta { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px; }
     .email-meta span { display: block; }
-    .email-content { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; max-height: 400px; overflow-y: auto; }
+    .email-content {
+      display: none;
+      margin-top: 12px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+      cursor: auto; /* agar kursor tidak berubah menjadi pointer saat berada di area konten */
+    }
     .email-card.open .email-content { display: block; }
-    .email-content pre { white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; background: #f9fafb; padding: 10px; border-radius: 8px; }
-    .email-html { max-height: 400px; overflow-y: auto; background: #f9fafb; padding: 10px; border-radius: 8px; }
-    .empty-state { text-align: center; padding: 60px 20px; background: var(--card-bg); border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-secondary); }
-    .badge { background: #eef2ff; color: var(--accent); padding: 2px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+    .email-content pre {
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 0.85rem;
+      background: #f9fafb;
+      padding: 10px;
+      border-radius: 8px;
+      user-select: text; /* pastikan teks bisa diseleksi */
+    }
+    .email-html {
+      max-height: 400px;
+      overflow-y: auto;
+      background: #f9fafb;
+      padding: 10px;
+      border-radius: 8px;
+      user-select: text;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: var(--card-bg);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+    }
+    .badge {
+      background: #eef2ff;
+      color: var(--accent);
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
     @media (max-width: 600px) {
       header h1 { font-size: 2rem; }
       .toolbar { flex-direction: column; align-items: stretch; }
@@ -200,20 +245,28 @@ function getHtml() {
   </style>
 </head>
 <body>
-  <header>
-    <h1>📬 Temp Mail</h1>
-    <p>Catch‑all inbox – semua email ke domain Anda muncul di sini</p>
-  </header>
-  <div class="toolbar">
-    <div id="status" class="badge">Menunggu...</div>
-    <div>
-      <button class="btn" onclick="loadAllEmails()">🔄 Refresh</button>
-      <button class="btn btn-outline" onclick="generateAndCopy()">⚡ Buat Alamat Acak</button>
+  <main>
+    <header>
+      <h1>📬 Temp Mail</h1>
+      <p>Catch‑all inbox – semua email ke domain Anda muncul di sini</p>
+    </header>
+
+    <div class="toolbar">
+      <div id="status" class="badge">Menunggu...</div>
+      <div>
+        <button class="btn" onclick="loadAllEmails()">🔄 Refresh</button>
+        <button class="btn btn-outline" onclick="generateAndCopy()">⚡ Buat Alamat Acak</button>
+      </div>
     </div>
-  </div>
-  <div id="emailList" class="email-list"><div class="empty-state">Memuat email...</div></div>
+
+    <div id="emailList" class="email-list">
+      <div class="empty-state">Memuat email...</div>
+    </div>
+  </main>
+
   <script>
     let openEmailId = null;
+
     async function loadAllEmails() {
       const listEl = document.getElementById('emailList');
       const statusEl = document.getElementById('status');
@@ -232,6 +285,7 @@ function getHtml() {
         console.error(err);
       }
     }
+
     function sanitizeHtml(html) {
       // Hapus tag script beserta isinya
       html = html.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '');
@@ -240,6 +294,7 @@ function getHtml() {
       html = html.replace(/\\son\\w+='[^']*'/gi, '');
       return html;
     }
+
     function renderEmails(emails) {
       const listEl = document.getElementById('emailList');
       if (!Array.isArray(emails) || emails.length === 0) {
@@ -260,7 +315,7 @@ function getHtml() {
           contentHtml = '<p style="color:#999;">Tidak ada konten yang dapat ditampilkan.</p>';
         }
         html += \`
-          <div class="email-card\${isOpen}" data-id="\${email.id}" onclick="toggleEmail(this)">
+          <div class="email-card\${isOpen}" data-id="\${email.id}" onclick="toggleEmail(event, this)">
             <div class="email-header">
               <div class="email-subject">\${escapeHtml(email.subject)}</div>
               <div class="badge">\${escapeHtml(email.to)}</div>
@@ -275,7 +330,12 @@ function getHtml() {
       });
       listEl.innerHTML = html;
     }
-    function toggleEmail(card) {
+
+    function toggleEmail(event, card) {
+      // Jika klik terjadi di dalam area konten, jangan toggle
+      if (event.target.closest('.email-content')) {
+        return;
+      }
       const id = card.dataset.id;
       if (card.classList.contains('open')) {
         card.classList.remove('open');
@@ -285,11 +345,13 @@ function getHtml() {
         openEmailId = id;
       }
     }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
     }
+
     async function generateAndCopy() {
       try {
         const res = await fetch('/api/generate', { method: 'POST' });
@@ -301,6 +363,7 @@ function getHtml() {
         console.error(err);
       }
     }
+
     window.addEventListener('DOMContentLoaded', () => {
       loadAllEmails();
       setInterval(loadAllEmails, 10000);
