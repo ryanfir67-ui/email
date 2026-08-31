@@ -1,0 +1,10 @@
+name = "temp-email-worker"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+kv_namespaces = [
+  { binding = "EMAIL_STORE", id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE" }
+]
+
+[vars]
+EMAIL_DOMAIN = "yourdomain.com"   # opsional, isi dengan domain Anda
