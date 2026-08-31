@@ -9,16 +9,34 @@ export default {
       recipients = [message.to];
     }
 
+    // Baca raw email sebagai ArrayBuffer
+    let rawBuffer;
+    try {
+      rawBuffer = await new Response(message.raw).arrayBuffer();
+    } catch (e) {
+      rawBuffer = new ArrayBuffer(0);
+    }
+
+    // Parse dengan PostalMime
     let parsed;
     try {
       const parser = new PostalMime();
-      parsed = await parser.parse(message.raw);
+      parsed = await parser.parse(rawBuffer);
     } catch (e) {
       parsed = { text: '', html: '' };
     }
 
-    const text = parsed.text || '';
-    const html = parsed.html || '';
+    let text = parsed.text || '';
+    let html = parsed.html || '';
+
+    // Fallback: jika keduanya kosong, gunakan raw email mentah sebagai teks
+    if (!text && !html && rawBuffer.byteLength > 0) {
+      try {
+        text = new TextDecoder().decode(rawBuffer);
+      } catch (e) {
+        text = 'Tidak dapat membaca isi email.';
+      }
+    }
 
     for (const toAddress of recipients) {
       const parts = toAddress.split('@');
@@ -39,6 +57,7 @@ export default {
         date,
         text,
         html,
+        raw: text || html ? '' : new TextDecoder().decode(rawBuffer) // simpan raw jika perlu
       };
 
       const key = `msg:${domain}:${localPart}:${emailObject.id}`;
@@ -222,6 +241,17 @@ function getHtml() {
       let html = '';
       emails.forEach(email => {
         const isOpen = (openEmailId === email.id) ? ' open' : '';
+        // Tentukan konten yang akan ditampilkan
+        let contentHtml = '';
+        if (email.html) {
+          contentHtml = '<iframe sandbox="allow-same-origin" srcdoc="' + escapeHtml(email.html) + '"></iframe>';
+        } else if (email.text) {
+          contentHtml = '<pre>' + escapeHtml(email.text) + '</pre>';
+        } else if (email.raw) {
+          contentHtml = '<pre>' + escapeHtml(email.raw) + '</pre>';
+        } else {
+          contentHtml = '<p style="color:#999;">Tidak ada konten yang dapat ditampilkan.</p>';
+        }
         html += \`
           <div class="email-card\${isOpen}" data-id="\${email.id}" onclick="toggleEmail(this)">
             <div class="email-header">
@@ -232,12 +262,7 @@ function getHtml() {
               <span><strong>Dari:</strong> \${escapeHtml(email.from)}</span>
               <span><strong>Waktu:</strong> \${escapeHtml(email.date)}</span>
             </div>
-            <div class="email-content">
-              \${email.html ? 
-                '<iframe sandbox="allow-same-origin" srcdoc="' + escapeHtml(email.html) + '"></iframe>' :
-                '<pre>' + escapeHtml(email.text || '') + '</pre>'
-              }
-            </div>
+            <div class="email-content">\${contentHtml}</div>
           </div>
         \`;
       });
