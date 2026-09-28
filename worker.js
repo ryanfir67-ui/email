@@ -202,7 +202,7 @@ function getHtml() {
       padding-top: 12px;
       max-height: 400px;
       overflow-y: auto;
-      cursor: auto; /* agar kursor tidak berubah menjadi pointer saat berada di area konten */
+      cursor: auto;
     }
     .email-card.open .email-content { display: block; }
     .email-content pre {
@@ -212,7 +212,7 @@ function getHtml() {
       background: #f9fafb;
       padding: 10px;
       border-radius: 8px;
-      user-select: text; /* pastikan teks bisa diseleksi */
+      user-select: text;
     }
     .email-html {
       max-height: 400px;
@@ -221,6 +221,10 @@ function getHtml() {
       padding: 10px;
       border-radius: 8px;
       user-select: text;
+      word-break: break-word;
+    }
+    .email-html * {
+      max-width: 100%;
     }
     .empty-state {
       text-align: center;
@@ -286,13 +290,47 @@ function getHtml() {
       }
     }
 
+    // Sanitasi HTML yang lebih kuat: hapus semua elemen yang memicu request eksternal
     function sanitizeHtml(html) {
-      // Hapus tag script beserta isinya
-      html = html.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '');
-      // Hapus atribut on* (event handler)
-      html = html.replace(/\\son\\w+="[^"]*"/gi, '');
-      html = html.replace(/\\son\\w+='[^']*'/gi, '');
-      return html;
+      // Buat dokumen sementara untuk mem-parsing HTML
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+
+      // Hapus elemen berbahaya / yang memuat sumber eksternal
+      const forbiddenTags = [
+        'script', 'iframe', 'object', 'embed', 'form',
+        'img', 'picture', 'source', 'video', 'audio',
+        'track', 'link', 'meta', 'base', 'style'
+      ];
+      forbiddenTags.forEach(tag => {
+        doc.querySelectorAll(tag).forEach(el => el.remove());
+      });
+
+      // Bersihkan atribut berbahaya dari semua elemen yang tersisa
+      doc.querySelectorAll('*').forEach(el => {
+        // Hapus atribut event handler (onclick, onload, dll.)
+        Array.from(el.attributes).forEach(attr => {
+          const name = attr.name.toLowerCase();
+          if (name.startsWith('on')) {
+            el.removeAttribute(attr.name);
+          }
+          // Hapus atribut src / href / srcset yang menunjuk ke luar
+          if (['src', 'srcset', 'href', 'background', 'action', 'formaction'].includes(name)) {
+            // Ganti link dengan teks biasa (biar tidak diklik keluar)
+            if (name === 'href' && el.tagName.toLowerCase() === 'a') {
+              // Ubah <a href="...">teks</a> menjadi teks biasa + URL
+              const linkText = el.textContent || '';
+              const url = attr.value || '';
+              const replacement = document.createTextNode(linkText + (url ? ' (' + url + ')' : ''));
+              el.parentNode.replaceChild(replacement, el);
+            } else {
+              el.removeAttribute(attr.name);
+            }
+          }
+        });
+      });
+
+      // Kembalikan innerHTML body
+      return doc.body.innerHTML;
     }
 
     function renderEmails(emails) {
@@ -306,7 +344,8 @@ function getHtml() {
         const isOpen = (openEmailId === email.id) ? ' open' : '';
         let contentHtml = '';
         if (email.html) {
-          contentHtml = '<div class="email-html">' + sanitizeHtml(email.html) + '</div>';
+          const cleaned = sanitizeHtml(email.html);
+          contentHtml = '<div class="email-html">' + cleaned + '</div>';
         } else if (email.text) {
           contentHtml = '<pre>' + escapeHtml(email.text) + '</pre>';
         } else if (email.raw) {
@@ -332,7 +371,6 @@ function getHtml() {
     }
 
     function toggleEmail(event, card) {
-      // Jika klik terjadi di dalam area konten, jangan toggle
       if (event.target.closest('.email-content')) {
         return;
       }
