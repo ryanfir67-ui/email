@@ -2,6 +2,18 @@ import PostalMime from 'postal-mime';
 
 const DEFAULT_DOMAIN = 'ryy.my.id';
 
+const NEAT_WORDS = [
+  'mail', 'inbox', 'box', 'temp', 'user', 'hello', 'hey',
+  'contact', 'info', 'admin', 'office', 'team', 'work',
+  'home', 'post', 'relay', 'note', 'ping', 'note', 'kita'
+];
+
+function generateNeatLocalPart() {
+  const word = NEAT_WORDS[Math.floor(Math.random() * NEAT_WORDS.length)];
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return word + '-' + num;
+}
+
 export default {
   async email(message, env, ctx) {
     let recipients = [];
@@ -103,7 +115,7 @@ export default {
     }
 
     if (path === '/api/generate' && request.method === 'POST') {
-      const localPart = generateLocalPart();
+      const localPart = generateNeatLocalPart();
       const domain = env.EMAIL_DOMAIN || DEFAULT_DOMAIN;
       const fullAddress = `${localPart}@${domain}`;
       return jsonResponse({ address: fullAddress, localPart, domain }, 200, corsHeaders);
@@ -112,16 +124,6 @@ export default {
     return new Response('Not found', { status: 404, headers: corsHeaders });
   },
 };
-
-function generateLocalPart() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  const bytes = crypto.getRandomValues(new Uint8Array(10));
-  for (let i = 0; i < 10; i++) {
-    result += chars[bytes[i] % chars.length];
-  }
-  return result;
-}
 
 function jsonResponse(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -139,7 +141,7 @@ function getHtml() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Temp Mail – Catch All</title>
+  <title>Temp Mail – ryy.my.id</title>
   <style>
     :root {
       --bg: #f5f7fa;
@@ -166,25 +168,137 @@ function getHtml() {
     }
     main {
       width: 100%;
-      max-width: 800px;
+      max-width: 820px;
       margin: 0 auto;
     }
-    header { text-align: center; margin-bottom: 30px; padding: 20px 0; }
-    header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; }
-    header p { color: var(--text-secondary); }
-    .toolbar {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 20px; gap: 10px; flex-wrap: wrap;
+    header { text-align: center; margin-bottom: 24px; padding: 12px 0; }
+    header h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.5px; }
+    header p { color: var(--text-secondary); font-size: 0.95rem; }
+
+    /* ====== Kartu Alamat Aktif ====== */
+    .address-card {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: white;
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      margin-bottom: 20px;
+      box-shadow: 0 6px 20px rgba(79, 70, 229, 0.25);
     }
+    .address-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      opacity: 0.9;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+    .address-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .address-value {
+      font-size: 1.2rem;
+      font-weight: 600;
+      flex: 1 1 200px;
+      word-break: break-all;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+      letter-spacing: 0.2px;
+    }
+    .address-card .btn {
+      background: rgba(255,255,255,0.18);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      backdrop-filter: blur(4px);
+    }
+    .address-card .btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    /* ====== Tombol Umum ====== */
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 10px 18px; background: var(--accent); color: white;
-      border: none; border-radius: 8px; font-size: 0.9rem;
-      font-weight: 500; cursor: pointer; transition: background 0.2s;
+      padding: 10px 16px; background: var(--accent); color: white;
+      border: none; border-radius: 8px; font-size: 0.88rem;
+      font-weight: 500; cursor: pointer; transition: background 0.2s, transform 0.1s;
+      text-decoration: none;
     }
     .btn:hover { background: var(--accent-hover); }
-    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
+    .btn:active { transform: scale(0.98); }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
     .btn-outline:hover { background: var(--border); }
+    .btn-small { padding: 8px 12px; font-size: 0.82rem; }
+
+    /* ====== Filter Bar ====== */
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .search-wrapper {
+      flex: 1;
+      min-width: 200px;
+      position: relative;
+    }
+    .search-wrapper::before {
+      content: '🔍';
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.85rem;
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .search-input {
+      width: 100%;
+      padding: 10px 14px 10px 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: var(--card-bg);
+      transition: border 0.2s, box-shadow 0.2s;
+      font-family: inherit;
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+    }
+    .filter-tabs {
+      display: flex;
+      gap: 3px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .tab {
+      padding: 6px 12px;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+      font-weight: 500;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    /* ====== Email list ====== */
     .email-list { display: flex; flex-direction: column; gap: 12px; }
     .email-card {
       background: var(--card-bg); border: 1px solid var(--border);
@@ -194,7 +308,7 @@ function getHtml() {
     }
     .email-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #d1d5db; }
     .email-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
-    .email-subject { font-weight: 600; font-size: 1.05rem; word-break: break-word; }
+    .email-subject { font-weight: 600; font-size: 1.02rem; word-break: break-word; }
     .email-meta { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px; }
     .email-meta span { display: block; }
     .email-content {
@@ -239,11 +353,12 @@ function getHtml() {
       color: var(--accent);
       padding: 2px 8px;
       border-radius: 20px;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       font-weight: 500;
+      white-space: nowrap;
     }
 
-    /* ====== Toast mengambang ====== */
+    /* ====== Toast ====== */
     .toast-container {
       position: fixed;
       bottom: 24px;
@@ -266,7 +381,7 @@ function getHtml() {
       padding: 12px 18px;
       border-radius: 10px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       display: flex;
       align-items: center;
       gap: 12px;
@@ -282,17 +397,12 @@ function getHtml() {
       padding: 2px 6px;
       border-radius: 4px;
       font-family: monospace;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
     }
     .toast .toast-close {
-      background: transparent;
-      border: none;
-      color: white;
-      cursor: pointer;
-      font-size: 1.1rem;
-      line-height: 1;
-      padding: 0 4px;
-      opacity: 0.7;
+      background: transparent; border: none; color: white;
+      cursor: pointer; font-size: 1.1rem; line-height: 1;
+      padding: 0 4px; opacity: 0.7;
     }
     .toast .toast-close:hover { opacity: 1; }
     @keyframes slideUp {
@@ -303,13 +413,13 @@ function getHtml() {
       from { opacity: 1; transform: translateY(0); }
       to { opacity: 0; transform: translateY(20px); }
     }
-    .toast.hide {
-      animation: fadeOut 0.3s ease-in forwards;
-    }
+    .toast.hide { animation: fadeOut 0.3s ease-in forwards; }
 
     @media (max-width: 600px) {
-      header h1 { font-size: 2rem; }
-      .toolbar { flex-direction: column; align-items: stretch; }
+      header h1 { font-size: 1.8rem; }
+      .address-value { font-size: 1rem; }
+      .filter-tabs { flex-wrap: wrap; }
+      .tab { font-size: 0.78rem; padding: 6px 9px; }
     }
   </style>
 </head>
@@ -317,45 +427,86 @@ function getHtml() {
   <main>
     <header>
       <h1>📬 Temp Mail</h1>
-      <p>Catch‑all inbox – semua email ke domain <strong>${DEFAULT_DOMAIN}</strong> muncul di sini</p>
+      <p>Catch‑all inbox untuk domain <strong>${DEFAULT_DOMAIN}</strong></p>
     </header>
 
-    <div class="toolbar">
-      <div id="status" class="badge">Menunggu...</div>
-      <div>
-        <button class="btn" onclick="loadAllEmails()">🔄 Refresh</button>
-        <button class="btn btn-outline" onclick="generateAndCopy()">⚡ Buat Alamat Acak</button>
+    <div class="address-card">
+      <div class="address-label">📮 Alamat Email Aktif</div>
+      <div class="address-row">
+        <div class="address-value" id="currentAddress">memuat…</div>
+        <button class="btn btn-small" onclick="copyAddress()">📋 Salin</button>
+        <button class="btn btn-small" onclick="newAddress()">⚡ Alamat Baru</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <div class="search-wrapper">
+        <input type="text" id="searchInput" class="search-input" placeholder="Cari subjek, pengirim, atau penerima…" oninput="applyFilter()">
+      </div>
+      <div class="filter-tabs" role="tablist">
+        <button class="tab active" data-range="all" onclick="setRange('all')">Semua</button>
+        <button class="tab" data-range="today" onclick="setRange('today')">Hari ini</button>
+        <button class="tab" data-range="7days" onclick="setRange('7days')">7 Hari</button>
+        <button class="tab" data-range="30days" onclick="setRange('30days')">30 Hari</button>
       </div>
     </div>
 
     <div id="emailList" class="email-list">
-      <div class="empty-state">Memuat email...</div>
+      <div class="empty-state">Memuat email…</div>
     </div>
   </main>
 
-  <!-- Kontainer toast mengambang -->
   <div id="toastContainer" class="toast-container"></div>
 
   <script>
+    const DOMAIN = '${DEFAULT_DOMAIN}';
+    const NEAT_WORDS = ['mail','inbox','box','temp','user','hello','hey','contact','info','admin','office','team','work','home','post','relay','note','ping'];
+    let allEmails = [];
     let openEmailId = null;
+    let filterState = { query: '', range: 'all' };
 
-    // ============ Toast helper ============
-    function showToast(message, type = 'info', duration = 4000) {
+    // ====== Alamat ======
+    function makeNeatAddress() {
+      const w = NEAT_WORDS[Math.floor(Math.random() * NEAT_WORDS.length)];
+      const n = Math.floor(1000 + Math.random() * 9000);
+      return w + '-' + n + '@' + DOMAIN;
+    }
+    function initAddress() {
+      let addr = localStorage.getItem('tempMailAddress');
+      if (!addr || !addr.endsWith('@' + DOMAIN)) {
+        addr = makeNeatAddress();
+        localStorage.setItem('tempMailAddress', addr);
+      }
+      document.getElementById('currentAddress').textContent = addr;
+    }
+    function newAddress() {
+      const addr = makeNeatAddress();
+      localStorage.setItem('tempMailAddress', addr);
+      document.getElementById('currentAddress').textContent = addr;
+      showToast('✨ Alamat baru dibuat: <code>' + escapeHtml(addr) + '</code>', 'success', 4000);
+    }
+    function copyAddress() {
+      const addr = document.getElementById('currentAddress').textContent;
+      navigator.clipboard.writeText(addr).then(() => {
+        showToast('✅ Alamat disalin ke clipboard', 'success', 2500);
+      }).catch(() => {
+        showToast('⚠️ Tidak dapat menyalin otomatis. Salin manual: <code>' + escapeHtml(addr) + '</code>', 'error', 7000);
+      });
+    }
+
+    // ====== Toast ======
+    function showToast(message, type, duration) {
+      type = type || 'info';
+      duration = duration || 4000;
       const container = document.getElementById('toastContainer');
       const toast = document.createElement('div');
       toast.className = 'toast ' + type;
       toast.innerHTML = '<div class="toast-text">' + message + '</div>' +
         '<button class="toast-close" aria-label="Tutup">✕</button>';
       container.appendChild(toast);
-
-      const closeBtn = toast.querySelector('.toast-close');
-      closeBtn.addEventListener('click', () => removeToast(toast));
-
-      if (duration > 0) {
-        setTimeout(() => removeToast(toast), duration);
-      }
+      toast.querySelector('.toast-close').addEventListener('click', () => removeToast(toast));
+      if (duration > 0) setTimeout(() => removeToast(toast), duration);
     }
-
     function removeToast(toast) {
       if (!toast.parentNode) return;
       toast.classList.add('hide');
@@ -364,44 +515,70 @@ function getHtml() {
       }, 300);
     }
 
-    // ============ Fetch & render ============
+    // ====== Fetch & render ======
     async function loadAllEmails() {
       const listEl = document.getElementById('emailList');
-      const statusEl = document.getElementById('status');
-      statusEl.textContent = 'Memuat...';
       try {
         const res = await fetch('/api/all-emails', {
           cache: 'no-store',
           credentials: 'omit'
         });
-        const emails = await res.json();
-        renderEmails(emails);
-        statusEl.textContent = emails.length + ' email';
+        allEmails = await res.json();
+        applyFilter();
       } catch (err) {
         listEl.innerHTML = '<div class="empty-state">Gagal memuat email. Coba lagi.</div>';
-        statusEl.textContent = 'Error';
         console.error(err);
       }
     }
 
+    // ====== Filter ======
+    function setRange(range) {
+      filterState.range = range;
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.range === range);
+      });
+      applyFilter();
+    }
+    function applyFilter() {
+      filterState.query = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+      const filtered = filterEmails(allEmails);
+      renderEmails(filtered);
+    }
+    function filterEmails(emails) {
+      const now = Date.now();
+      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+      const startTodayTs = startOfToday.getTime();
+      return emails.filter(email => {
+        if (filterState.query) {
+          const q = filterState.query;
+          const match =
+            (email.subject || '').toLowerCase().includes(q) ||
+            (email.from || '').toLowerCase().includes(q) ||
+            (email.to || '').toLowerCase().includes(q);
+          if (!match) return false;
+        }
+        if (filterState.range !== 'all') {
+          const t = new Date(email.date).getTime();
+          if (filterState.range === 'today' && t < startTodayTs) return false;
+          if (filterState.range === '7days' && t < now - 7 * 24 * 60 * 60 * 1000) return false;
+          if (filterState.range === '30days' && t < now - 30 * 24 * 60 * 60 * 1000) return false;
+        }
+        return true;
+      });
+    }
+
+    // ====== HTML sanitizer ======
     function sanitizeHtml(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const forbiddenTags = [
-        'script', 'iframe', 'object', 'embed', 'form',
-        'img', 'picture', 'source', 'video', 'audio',
-        'track', 'link', 'meta', 'base', 'style'
-      ];
+      const forbiddenTags = ['script','iframe','object','embed','form','img','picture','source','video','audio','track','link','meta','base','style'];
       forbiddenTags.forEach(tag => {
         doc.querySelectorAll(tag).forEach(el => el.remove());
       });
-
       doc.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
           const name = attr.name.toLowerCase();
-          if (name.startsWith('on')) {
-            el.removeAttribute(attr.name);
-          }
-          if (['src', 'srcset', 'href', 'background', 'action', 'formaction'].includes(name)) {
+          if (name.startsWith('on')) el.removeAttribute(attr.name);
+          if (['src','srcset','href','background','action','formaction'].includes(name)) {
             if (name === 'href' && el.tagName.toLowerCase() === 'a') {
               const linkText = el.textContent || '';
               const url = attr.value || '';
@@ -413,14 +590,22 @@ function getHtml() {
           }
         });
       });
-
       return doc.body.innerHTML;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text == null ? '' : text;
+      return div.innerHTML;
     }
 
     function renderEmails(emails) {
       const listEl = document.getElementById('emailList');
       if (!Array.isArray(emails) || emails.length === 0) {
-        listEl.innerHTML = '<div class="empty-state">Belum ada email masuk. Kirim email ke alamat apa pun di domain ${DEFAULT_DOMAIN}.</div>';
+        const empty = allEmails.length === 0
+          ? 'Belum ada email masuk. Kirim email ke alamat apa pun di domain ' + DOMAIN + '.'
+          : 'Tidak ada email yang cocok dengan filter Anda.';
+        listEl.innerHTML = '<div class="empty-state">' + empty + '</div>';
         return;
       }
       let html = '';
@@ -428,8 +613,7 @@ function getHtml() {
         const isOpen = (openEmailId === email.id) ? ' open' : '';
         let contentHtml = '';
         if (email.html) {
-          const cleaned = sanitizeHtml(email.html);
-          contentHtml = '<div class="email-html">' + cleaned + '</div>';
+          contentHtml = '<div class="email-html">' + sanitizeHtml(email.html) + '</div>';
         } else if (email.text) {
           contentHtml = '<pre>' + escapeHtml(email.text) + '</pre>';
         } else if (email.raw) {
@@ -437,6 +621,7 @@ function getHtml() {
         } else {
           contentHtml = '<p style="color:#999;">Tidak ada konten yang dapat ditampilkan.</p>';
         }
+        const dateStr = formatDate(email.date);
         html += \`
           <div class="email-card\${isOpen}" data-id="\${email.id}" onclick="toggleEmail(event, this)">
             <div class="email-header">
@@ -445,7 +630,7 @@ function getHtml() {
             </div>
             <div class="email-meta">
               <span><strong>Dari:</strong> \${escapeHtml(email.from)}</span>
-              <span><strong>Waktu:</strong> \${escapeHtml(email.date)}</span>
+              <span><strong>Waktu:</strong> \${escapeHtml(dateStr)}</span>
             </div>
             <div class="email-content">\${contentHtml}</div>
           </div>
@@ -454,10 +639,19 @@ function getHtml() {
       listEl.innerHTML = html;
     }
 
-    function toggleEmail(event, card) {
-      if (event.target.closest('.email-content')) {
-        return;
+    function formatDate(dateStr) {
+      try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const opts = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+        return d.toLocaleString('id-ID', opts);
+      } catch (e) {
+        return dateStr;
       }
+    }
+
+    function toggleEmail(event, card) {
+      if (event.target.closest('.email-content')) return;
       const id = card.dataset.id;
       if (card.classList.contains('open')) {
         card.classList.remove('open');
@@ -468,30 +662,8 @@ function getHtml() {
       }
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    async function generateAndCopy() {
-      try {
-        const res = await fetch('/api/generate', { method: 'POST' });
-        const data = await res.json();
-        try {
-          await navigator.clipboard.writeText(data.address);
-          showToast('✅ Alamat disalin: <code>' + escapeHtml(data.address) + '</code>', 'success', 5000);
-        } catch (clipErr) {
-          // Jika clipboard tidak tersedia (misal iframe tanpa izin)
-          showToast('📧 Alamat: <code>' + escapeHtml(data.address) + '</code>', 'info', 8000);
-        }
-      } catch (err) {
-        showToast('❌ Gagal membuat alamat. Periksa konfigurasi domain.', 'error', 5000);
-        console.error(err);
-      }
-    }
-
     window.addEventListener('DOMContentLoaded', () => {
+      initAddress();
       loadAllEmails();
       setInterval(loadAllEmails, 10000);
     });
