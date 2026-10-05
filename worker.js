@@ -1,9 +1,8 @@
 import PostalMime from 'postal-mime';
 
 const DEFAULT_DOMAIN = 'ryy.my.id';
-
-// 28 hari dalam detik
-const EMAIL_TTL_SECONDS = 28 * 24 * 60 * 60; // 2.419.200 detik
+const EMAIL_TTL_SECONDS = 28 * 24 * 60 * 60; // 28 hari
+const MAX_EMAILS = 50; // jumlah email yang diambil & ditampilkan
 
 const NEAT_WORDS = [
   'mail', 'inbox', 'box', 'temp', 'user', 'hello', 'hey',
@@ -21,6 +20,11 @@ function generateNeatLocalPart() {
   const word = NEAT_WORDS[Math.floor(Math.random() * NEAT_WORDS.length)];
   const num = Math.floor(1000 + Math.random() * 9000);
   return word + '-' + num;
+}
+
+// Inverted timestamp: makin baru = makin kecil nilainya
+function invertedTs(ms) {
+  return String(9999999999999 - ms).padStart(13, '0');
 }
 
 export default {
@@ -61,9 +65,6 @@ export default {
     for (const toAddress of recipients) {
       const parts = toAddress.split('@');
       if (parts.length < 2) continue;
-      const localPart = parts[0];
-      const domain = parts.slice(1).join('@');
-
       const headers = message.headers;
       const from = headers.get('from') || 'Unknown';
       const subject = headers.get('subject') || '(no subject)';
@@ -80,10 +81,8 @@ export default {
         raw: text || html ? '' : new TextDecoder().decode(rawBuffer)
       };
 
-      const ts = Date.now();
-      const key = `msg:${domain}:${localPart}:${ts}:${emailObject.id}`;
-
-      // Simpan dengan expirationTtl = 28 hari → otomatis terhapus oleh Cloudflare KV
+      // Key: msg:INVTS:UUID  → KV list() otomatis urut terbaru dulu
+      const key = `msg:${invertedTs(Date.now())}:${emailObject.id}`;
       await env.EMAIL_STORE.put(key, JSON.stringify(emailObject), {
         expirationTtl: EMAIL_TTL_SECONDS
       });
@@ -123,48 +122,31 @@ export default {
       });
     }
 
+    // ====== API: daftar email (cepat) ======
     if (path === '/api/all-emails' && request.method === 'GET') {
-      const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 200);
+      // 1. list() langsung dibatasi 50 → tidak perlu sort → cepat
+      const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: MAX_EMAILS });
 
-      const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: 1000 });
-
-      // Filter email yang lebih tua dari 28 hari (untuk berjaga-jaga
-      // jika ada entry lama sebelum fitur TTL aktif) lalu urutkan terbaru
-      const cutoffTs = Date.now() - EMAIL_TTL_SECONDS * 1000;
-      const sortedKeys = list.keys
-        .map(k => k.name)
-        .filter(k => {
-          const parts = k.split(':');
-          const ts = parseInt(parts[parts.length - 2], 10) || 0;
-          return ts >= cutoffTs;
-        })
-        .sort((a, b) => {
-          const partsA = a.split(':');
-          const partsB = b.split(':');
-          const tsA = parseInt(partsA[partsA.length - 2], 10) || 0;
-          const tsB = parseInt(partsB[partsB.length - 2], 10) || 0;
-          return tsB - tsA;
-        })
-        .slice(0, limit);
-
-      const values = await Promise.all(
-        sortedKeys.map(key => env.EMAIL_STORE.get(key))
-      );
-
-      const emails = [];
-      for (const value of values) {
-        if (value) {
-          try {
-            emails.push(JSON.parse(value));
-          } catch (e) {}
+      // 2. Filter hanya key format baru (msg:13-digit:uuid)
+      const keyNames = [];
+      for (const k of list.keys) {
+        if (/^msg:\d{13}:[0-9a-f-]{36}$/i.test(k.name)) {
+          keyNames.push(k.name);
         }
       }
+
+      // 3. Ambil semua value secara paralel dengan type json (tanpa parse manual)
+      const results = await Promise.all(
+        keyNames.map(k => env.EMAIL_STORE.get(k, 'json'))
+      );
+
+      const emails = results.filter(r => r !== null);
 
       return new Response(JSON.stringify(emails), {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'private, max-age=5',
+          'Cache-Control': 'private, max-age=3',
           ...corsHeaders,
         },
       });
@@ -173,8 +155,11 @@ export default {
     if (path === '/api/generate' && request.method === 'POST') {
       const localPart = generateNeatLocalPart();
       const domain = env.EMAIL_DOMAIN || DEFAULT_DOMAIN;
-      const fullAddress = `${localPart}@${domain}`;
-      return jsonResponse({ address: fullAddress, localPart, domain }, 200, corsHeaders);
+      return jsonResponse({
+        address: `${localPart}@${domain}`,
+        localPart,
+        domain
+      }, 200, corsHeaders);
     }
 
     return new Response('Not found', { status: 404, headers: corsHeaders });
@@ -184,10 +169,7 @@ export default {
 function jsonResponse(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
 
@@ -201,27 +183,18 @@ function getHtml() {
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
   <style>
     :root {
-      --bg: #f5f7fa;
-      --card-bg: #ffffff;
-      --text: #1a1a2e;
-      --text-secondary: #6b7280;
-      --border: #e5e7eb;
-      --accent: #4f46e5;
-      --accent-hover: #4338ca;
+      --bg: #f5f7fa; --card-bg: #ffffff; --text: #1a1a2e;
+      --text-secondary: #6b7280; --border: #e5e7eb;
+      --accent: #4f46e5; --accent-hover: #4338ca;
       --shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1);
       --radius: 12px;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      padding: 20px;
+      background: var(--bg); color: var(--text); line-height: 1.6;
+      min-height: 100vh; display: flex; justify-content: center;
+      align-items: flex-start; padding: 20px;
     }
     main { width: 100%; max-width: 820px; margin: 0 auto; }
     header { text-align: center; margin-bottom: 24px; padding: 12px 0; }
@@ -230,32 +203,22 @@ function getHtml() {
 
     .address-card {
       background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-      color: white;
-      border-radius: var(--radius);
-      padding: 20px 22px;
-      margin-bottom: 20px;
+      color: white; border-radius: var(--radius);
+      padding: 20px 22px; margin-bottom: 20px;
       box-shadow: 0 6px 20px rgba(79, 70, 229, 0.25);
     }
     .address-label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 1.2px;
-      opacity: 0.9;
-      margin-bottom: 10px;
-      font-weight: 600;
+      font-size: 0.75rem; text-transform: uppercase;
+      letter-spacing: 1.2px; opacity: 0.9; margin-bottom: 10px; font-weight: 600;
     }
     .address-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .address-value {
-      font-size: 1.2rem;
-      font-weight: 600;
-      flex: 1 1 200px;
+      font-size: 1.2rem; font-weight: 600; flex: 1 1 200px;
       word-break: break-all;
       font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
-      letter-spacing: 0.2px;
     }
     .address-card .btn {
-      background: rgba(255,255,255,0.18);
-      color: white;
+      background: rgba(255,255,255,0.18); color: white;
       border: 1px solid rgba(255,255,255,0.3);
       backdrop-filter: blur(4px);
     }
@@ -265,14 +228,21 @@ function getHtml() {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 10px 16px; background: var(--accent); color: white;
       border: none; border-radius: 8px; font-size: 0.88rem;
-      font-weight: 500; cursor: pointer; transition: background 0.2s, transform 0.1s;
+      font-weight: 500; cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
       text-decoration: none;
     }
     .btn:hover { background: var(--accent-hover); }
     .btn:active { transform: scale(0.98); }
-    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
-    .btn-outline:hover { background: var(--border); }
     .btn-small { padding: 8px 12px; font-size: 0.82rem; }
+
+    .info-note {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.8rem; color: var(--text-secondary);
+      background: #eef2ff; border-left: 3px solid var(--accent);
+      padding: 10px 14px; border-radius: 8px; margin-bottom: 16px;
+    }
+    .info-note strong { color: var(--accent); }
 
     .filter-bar {
       display: flex; gap: 10px; margin-bottom: 16px;
@@ -280,10 +250,9 @@ function getHtml() {
     }
     .search-wrapper { flex: 1; min-width: 200px; position: relative; }
     .search-wrapper::before {
-      content: '🔍';
-      position: absolute; left: 12px; top: 50%;
-      transform: translateY(-50%);
-      font-size: 0.85rem; opacity: 0.6; pointer-events: none;
+      content: '🔍'; position: absolute; left: 12px; top: 50%;
+      transform: translateY(-50%); font-size: 0.85rem;
+      opacity: 0.6; pointer-events: none;
     }
     .search-input {
       width: 100%; padding: 10px 14px 10px 36px;
@@ -301,25 +270,12 @@ function getHtml() {
     }
     .tab {
       padding: 6px 12px; background: transparent; border: none;
-      border-radius: 6px; font-size: 0.82rem; color: var(--text-secondary);
-      cursor: pointer; transition: all 0.15s; font-family: inherit; font-weight: 500;
+      border-radius: 6px; font-size: 0.82rem;
+      color: var(--text-secondary); cursor: pointer;
+      transition: all 0.15s; font-family: inherit; font-weight: 500;
     }
     .tab:hover { color: var(--text); }
     .tab.active { background: var(--accent); color: white; }
-
-    .info-note {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      background: #eef2ff;
-      border-left: 3px solid var(--accent);
-      padding: 10px 14px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    .info-note strong { color: var(--accent); }
 
     .email-list { display: flex; flex-direction: column; gap: 12px; }
     .email-card {
@@ -327,45 +283,66 @@ function getHtml() {
       border-radius: var(--radius); box-shadow: var(--shadow);
       padding: 16px 18px; transition: all 0.2s ease; cursor: pointer;
     }
-    .email-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #d1d5db; }
-    .email-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+    .email-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border-color: #d1d5db;
+    }
+    .email-header {
+      display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 10px; flex-wrap: wrap;
+    }
     .email-subject { font-weight: 600; font-size: 1.02rem; word-break: break-word; }
-    .email-meta { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px; }
+    .email-meta {
+      display: flex; flex-direction: column; gap: 2px;
+      font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;
+    }
     .email-meta span { display: block; }
     .email-content {
-      display: none; margin-top: 12px; border-top: 1px solid var(--border);
-      padding-top: 12px; max-height: 400px; overflow-y: auto; cursor: auto;
+      display: none; margin-top: 12px;
+      border-top: 1px solid var(--border); padding-top: 12px;
+      max-height: 400px; overflow-y: auto; cursor: auto;
     }
     .email-card.open .email-content { display: block; }
     .email-content pre {
-      white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;
-      background: #f9fafb; padding: 10px; border-radius: 8px; user-select: text;
+      white-space: pre-wrap; font-family: monospace;
+      font-size: 0.85rem; background: #f9fafb;
+      padding: 10px; border-radius: 8px; user-select: text;
     }
     .email-html {
       max-height: 400px; overflow-y: auto; background: #f9fafb;
-      padding: 10px; border-radius: 8px; user-select: text; word-break: break-word;
+      padding: 10px; border-radius: 8px;
+      user-select: text; word-break: break-word;
     }
     .email-html * { max-width: 100%; }
     .empty-state {
-      text-align: center; padding: 60px 20px; background: var(--card-bg);
-      border: 1px dashed var(--border); border-radius: var(--radius);
-      color: var(--text-secondary);
+      text-align: center; padding: 60px 20px;
+      background: var(--card-bg); border: 1px dashed var(--border);
+      border-radius: var(--radius); color: var(--text-secondary);
     }
     .badge {
-      background: #eef2ff; color: var(--accent); padding: 2px 8px;
-      border-radius: 20px; font-size: 0.72rem; font-weight: 500; white-space: nowrap;
+      background: #eef2ff; color: var(--accent);
+      padding: 2px 8px; border-radius: 20px;
+      font-size: 0.72rem; font-weight: 500; white-space: nowrap;
     }
     .loading-bar {
       height: 3px; background: linear-gradient(90deg, #4f46e5, #7c3aed);
-      width: 0; border-radius: 2px; transition: width 0.3s ease;
-      margin-bottom: 10px;
+      width: 0; border-radius: 2px;
+      transition: width 0.3s ease; margin-bottom: 10px;
     }
     .loading-bar.active { width: 100%; }
+    .status-dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; margin-right: 6px;
+      background: #10b981;
+    }
+    .status-dot.loading { background: #f59e0b; }
 
     .toast-container {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-      z-index: 9999; display: flex; flex-direction: column; align-items: center;
-      gap: 10px; pointer-events: none; width: 100%; max-width: 480px; padding: 0 16px;
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%); z-index: 9999;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 10px; pointer-events: none;
+      width: 100%; max-width: 480px; padding: 0 16px;
     }
     .toast {
       pointer-events: auto; background: #1f2937; color: #ffffff;
@@ -439,7 +416,7 @@ function getHtml() {
 
     <div class="loading-bar" id="loadingBar"></div>
     <div id="emailList" class="email-list">
-      <div class="empty-state">Memuat email…</div>
+      <div class="empty-state"><span class="status-dot loading"></span>Memuat email…</div>
     </div>
   </main>
 
@@ -447,6 +424,7 @@ function getHtml() {
 
   <script>
     const DOMAIN = '${DEFAULT_DOMAIN}';
+    const CACHE_KEY = 'tempMailCache_v1';
     const NEAT_WORDS = ['mail','inbox','box','temp','user','hello','hey','contact','info','admin','office','team','work','home','post','relay','note','ping'];
     let allEmails = [];
     let openEmailId = null;
@@ -483,8 +461,7 @@ function getHtml() {
     }
 
     function showToast(message, type, duration) {
-      type = type || 'info';
-      duration = duration || 4000;
+      type = type || 'info'; duration = duration || 4000;
       const container = document.getElementById('toastContainer');
       const toast = document.createElement('div');
       toast.className = 'toast ' + type;
@@ -497,18 +474,33 @@ function getHtml() {
     function removeToast(toast) {
       if (!toast.parentNode) return;
       toast.classList.add('hide');
-      setTimeout(() => {
-        if (toast.parentNode) toast.parentNode.removeChild(toast);
-      }, 300);
+      setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
     }
 
+    // ====== Cache ======
+    function loadCache() {
+      try {
+        const raw = sessionStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (Array.isArray(data) && data.length > 0) return data;
+      } catch (e) {}
+      return null;
+    }
+    function saveCache(emails) {
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(emails));
+      } catch (e) {}
+    }
+
+    // ====== Load (cache dulu, fetch di background) ======
     async function loadAllEmails() {
       if (isFetching) return;
       isFetching = true;
       const bar = document.getElementById('loadingBar');
       bar.classList.add('active');
       try {
-        const res = await fetch('/api/all-emails?limit=100', {
+        const res = await fetch('/api/all-emails', {
           cache: 'default',
           credentials: 'omit'
         });
@@ -517,10 +509,15 @@ function getHtml() {
         if (newIds !== lastIds) {
           lastIds = newIds;
           allEmails = data;
+          saveCache(data);
           applyFilter();
         }
       } catch (err) {
         console.error(err);
+        if (allEmails.length === 0) {
+          document.getElementById('emailList').innerHTML =
+            '<div class="empty-state">Gagal memuat email. Periksa koneksi.</div>';
+        }
       } finally {
         isFetching = false;
         setTimeout(() => bar.classList.remove('active'), 300);
@@ -564,9 +561,7 @@ function getHtml() {
     function sanitizeHtml(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const forbiddenTags = ['script','iframe','object','embed','form','img','picture','source','video','audio','track','link','meta','base','style'];
-      forbiddenTags.forEach(tag => {
-        doc.querySelectorAll(tag).forEach(el => el.remove());
-      });
+      forbiddenTags.forEach(tag => doc.querySelectorAll(tag).forEach(el => el.remove()));
       doc.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
           const name = attr.name.toLowerCase();
@@ -638,9 +633,7 @@ function getHtml() {
         if (isNaN(d.getTime())) return dateStr;
         const opts = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
         return d.toLocaleString('id-ID', opts);
-      } catch (e) {
-        return dateStr;
-      }
+      } catch (e) { return dateStr; }
     }
 
     function toggleEmail(event, card) {
@@ -657,7 +650,18 @@ function getHtml() {
 
     window.addEventListener('DOMContentLoaded', () => {
       initAddress();
+
+      // 1. Tampilkan cache dulu → instan
+      const cached = loadCache();
+      if (cached) {
+        allEmails = cached;
+        lastIds = JSON.stringify(cached.map(e => e.id));
+        applyFilter();
+      }
+
+      // 2. Fetch data terbaru di background
       loadAllEmails();
+
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) loadAllEmails();
       });
