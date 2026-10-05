@@ -5,8 +5,14 @@ const DEFAULT_DOMAIN = 'ryy.my.id';
 const NEAT_WORDS = [
   'mail', 'inbox', 'box', 'temp', 'user', 'hello', 'hey',
   'contact', 'info', 'admin', 'office', 'team', 'work',
-  'home', 'post', 'relay', 'note', 'ping', 'note', 'kita'
+  'home', 'post', 'relay', 'note', 'ping'
 ];
+
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#4f46e5"/>
+  <path d="M14 20h36a2 2 0 0 1 2 2v20a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V22a2 2 0 0 1 2-2z" fill="#fff"/>
+  <path d="M12 22l20 14 20-14" stroke="#4f46e5" stroke-width="2" fill="none" stroke-linejoin="round"/>
+</svg>`;
 
 function generateNeatLocalPart() {
   const word = NEAT_WORDS[Math.floor(Math.random() * NEAT_WORDS.length)];
@@ -71,7 +77,8 @@ export default {
         raw: text || html ? '' : new TextDecoder().decode(rawBuffer)
       };
 
-      const key = `msg:${domain}:${localPart}:${emailObject.id}`;
+      const ts = Date.now();
+      const key = `msg:${domain}:${localPart}:${ts}:${emailObject.id}`;
       await env.EMAIL_STORE.put(key, JSON.stringify(emailObject));
     }
   },
@@ -90,19 +97,47 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    if (path === '/favicon.ico' || path === '/favicon.svg') {
+      return new Response(FAVICON_SVG, {
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=86400',
+        },
+      });
+    }
+
     if (path === '/' && request.method === 'GET') {
       return new Response(getHtml(), {
-        headers: { 'Content-Type': 'text/html', ...corsHeaders },
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          ...corsHeaders,
+        },
       });
     }
 
     if (path === '/api/all-emails' && request.method === 'GET') {
-      const prefix = 'msg:';
-      const list = await env.EMAIL_STORE.list({ prefix });
-      const emails = [];
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 200);
 
-      for (const key of list.keys) {
-        const value = await env.EMAIL_STORE.get(key.name);
+      const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: 1000 });
+
+      const sortedKeys = list.keys
+        .map(k => k.name)
+        .sort((a, b) => {
+          const partsA = a.split(':');
+          const partsB = b.split(':');
+          const tsA = parseInt(partsA[partsA.length - 2], 10) || 0;
+          const tsB = parseInt(partsB[partsB.length - 2], 10) || 0;
+          return tsB - tsA;
+        })
+        .slice(0, limit);
+
+      const values = await Promise.all(
+        sortedKeys.map(key => env.EMAIL_STORE.get(key))
+      );
+
+      const emails = [];
+      for (const value of values) {
         if (value) {
           try {
             emails.push(JSON.parse(value));
@@ -110,8 +145,14 @@ export default {
         }
       }
 
-      emails.sort((a, b) => new Date(b.date) - new Date(a.date));
-      return jsonResponse(emails.slice(0, 200), 200, corsHeaders);
+      return new Response(JSON.stringify(emails), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'private, max-age=5',
+          ...corsHeaders,
+        },
+      });
     }
 
     if (path === '/api/generate' && request.method === 'POST') {
@@ -142,6 +183,7 @@ function getHtml() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Temp Mail – ryy.my.id</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
   <style>
     :root {
       --bg: #f5f7fa;
@@ -166,16 +208,11 @@ function getHtml() {
       align-items: flex-start;
       padding: 20px;
     }
-    main {
-      width: 100%;
-      max-width: 820px;
-      margin: 0 auto;
-    }
+    main { width: 100%; max-width: 820px; margin: 0 auto; }
     header { text-align: center; margin-bottom: 24px; padding: 12px 0; }
     header h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.5px; }
     header p { color: var(--text-secondary); font-size: 0.95rem; }
 
-    /* ====== Kartu Alamat Aktif ====== */
     .address-card {
       background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
       color: white;
@@ -193,10 +230,7 @@ function getHtml() {
       font-weight: 600;
     }
     .address-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
     .address-value {
       font-size: 1.2rem;
@@ -212,11 +246,8 @@ function getHtml() {
       border: 1px solid rgba(255,255,255,0.3);
       backdrop-filter: blur(4px);
     }
-    .address-card .btn:hover {
-      background: rgba(255,255,255,0.3);
-    }
+    .address-card .btn:hover { background: rgba(255,255,255,0.3); }
 
-    /* ====== Tombol Umum ====== */
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 10px 16px; background: var(--accent); color: white;
@@ -226,85 +257,48 @@ function getHtml() {
     }
     .btn:hover { background: var(--accent-hover); }
     .btn:active { transform: scale(0.98); }
-    .btn-outline {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-secondary);
-    }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
     .btn-outline:hover { background: var(--border); }
     .btn-small { padding: 8px 12px; font-size: 0.82rem; }
 
-    /* ====== Filter Bar ====== */
     .filter-bar {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-      align-items: center;
+      display: flex; gap: 10px; margin-bottom: 16px;
+      flex-wrap: wrap; align-items: center;
     }
-    .search-wrapper {
-      flex: 1;
-      min-width: 200px;
-      position: relative;
-    }
+    .search-wrapper { flex: 1; min-width: 200px; position: relative; }
     .search-wrapper::before {
       content: '🔍';
-      position: absolute;
-      left: 12px;
-      top: 50%;
+      position: absolute; left: 12px; top: 50%;
       transform: translateY(-50%);
-      font-size: 0.85rem;
-      opacity: 0.6;
-      pointer-events: none;
+      font-size: 0.85rem; opacity: 0.6; pointer-events: none;
     }
     .search-input {
-      width: 100%;
-      padding: 10px 14px 10px 36px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.9rem;
-      background: var(--card-bg);
-      transition: border 0.2s, box-shadow 0.2s;
-      font-family: inherit;
+      width: 100%; padding: 10px 14px 10px 36px;
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 0.9rem; background: var(--card-bg);
+      transition: border 0.2s, box-shadow 0.2s; font-family: inherit;
     }
     .search-input:focus {
-      outline: none;
-      border-color: var(--accent);
+      outline: none; border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
     }
     .filter-tabs {
-      display: flex;
-      gap: 3px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 3px;
+      display: flex; gap: 3px; background: var(--card-bg);
+      border: 1px solid var(--border); border-radius: 8px; padding: 3px;
     }
     .tab {
-      padding: 6px 12px;
-      background: transparent;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.82rem;
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: inherit;
-      font-weight: 500;
+      padding: 6px 12px; background: transparent; border: none;
+      border-radius: 6px; font-size: 0.82rem; color: var(--text-secondary);
+      cursor: pointer; transition: all 0.15s; font-family: inherit; font-weight: 500;
     }
     .tab:hover { color: var(--text); }
-    .tab.active {
-      background: var(--accent);
-      color: white;
-    }
+    .tab.active { background: var(--accent); color: white; }
 
-    /* ====== Email list ====== */
     .email-list { display: flex; flex-direction: column; gap: 12px; }
     .email-card {
       background: var(--card-bg); border: 1px solid var(--border);
       border-radius: var(--radius); box-shadow: var(--shadow);
-      padding: 16px 18px; transition: all 0.2s ease;
-      cursor: pointer;
+      padding: 16px 18px; transition: all 0.2s ease; cursor: pointer;
     }
     .email-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #d1d5db; }
     .email-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
@@ -312,92 +306,53 @@ function getHtml() {
     .email-meta { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px; }
     .email-meta span { display: block; }
     .email-content {
-      display: none;
-      margin-top: 12px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-      max-height: 400px;
-      overflow-y: auto;
-      cursor: auto;
+      display: none; margin-top: 12px; border-top: 1px solid var(--border);
+      padding-top: 12px; max-height: 400px; overflow-y: auto; cursor: auto;
     }
     .email-card.open .email-content { display: block; }
     .email-content pre {
-      white-space: pre-wrap;
-      font-family: monospace;
-      font-size: 0.85rem;
-      background: #f9fafb;
-      padding: 10px;
-      border-radius: 8px;
-      user-select: text;
+      white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;
+      background: #f9fafb; padding: 10px; border-radius: 8px; user-select: text;
     }
     .email-html {
-      max-height: 400px;
-      overflow-y: auto;
-      background: #f9fafb;
-      padding: 10px;
-      border-radius: 8px;
-      user-select: text;
-      word-break: break-word;
+      max-height: 400px; overflow-y: auto; background: #f9fafb;
+      padding: 10px; border-radius: 8px; user-select: text; word-break: break-word;
     }
     .email-html * { max-width: 100%; }
     .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      background: var(--card-bg);
-      border: 1px dashed var(--border);
-      border-radius: var(--radius);
+      text-align: center; padding: 60px 20px; background: var(--card-bg);
+      border: 1px dashed var(--border); border-radius: var(--radius);
       color: var(--text-secondary);
     }
     .badge {
-      background: #eef2ff;
-      color: var(--accent);
-      padding: 2px 8px;
-      border-radius: 20px;
-      font-size: 0.72rem;
-      font-weight: 500;
-      white-space: nowrap;
+      background: #eef2ff; color: var(--accent); padding: 2px 8px;
+      border-radius: 20px; font-size: 0.72rem; font-weight: 500; white-space: nowrap;
     }
+    .loading-bar {
+      height: 3px; background: linear-gradient(90deg, #4f46e5, #7c3aed);
+      width: 0; border-radius: 2px; transition: width 0.3s ease;
+      margin-bottom: 10px;
+    }
+    .loading-bar.active { width: 100%; }
 
-    /* ====== Toast ====== */
     .toast-container {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-      pointer-events: none;
-      width: 100%;
-      max-width: 480px;
-      padding: 0 16px;
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 9999; display: flex; flex-direction: column; align-items: center;
+      gap: 10px; pointer-events: none; width: 100%; max-width: 480px; padding: 0 16px;
     }
     .toast {
-      pointer-events: auto;
-      background: #1f2937;
-      color: #ffffff;
-      padding: 12px 18px;
-      border-radius: 10px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-      font-size: 0.88rem;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      width: 100%;
-      animation: slideUp 0.3s ease-out;
-      word-break: break-all;
+      pointer-events: auto; background: #1f2937; color: #ffffff;
+      padding: 12px 18px; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15); font-size: 0.88rem;
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      animation: slideUp 0.3s ease-out; word-break: break-all;
     }
     .toast.success { background: #059669; }
     .toast.error { background: #dc2626; }
     .toast .toast-text { flex: 1; }
     .toast code {
-      background: rgba(255,255,255,0.15);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 0.88rem;
+      background: rgba(255,255,255,0.15); padding: 2px 6px;
+      border-radius: 4px; font-family: monospace; font-size: 0.88rem;
     }
     .toast .toast-close {
       background: transparent; border: none; color: white;
@@ -451,6 +406,7 @@ function getHtml() {
       </div>
     </div>
 
+    <div class="loading-bar" id="loadingBar"></div>
     <div id="emailList" class="email-list">
       <div class="empty-state">Memuat email…</div>
     </div>
@@ -464,8 +420,9 @@ function getHtml() {
     let allEmails = [];
     let openEmailId = null;
     let filterState = { query: '', range: 'all' };
+    let isFetching = false;
+    let lastIds = null;
 
-    // ====== Alamat ======
     function makeNeatAddress() {
       const w = NEAT_WORDS[Math.floor(Math.random() * NEAT_WORDS.length)];
       const n = Math.floor(1000 + Math.random() * 9000);
@@ -490,11 +447,10 @@ function getHtml() {
       navigator.clipboard.writeText(addr).then(() => {
         showToast('✅ Alamat disalin ke clipboard', 'success', 2500);
       }).catch(() => {
-        showToast('⚠️ Tidak dapat menyalin otomatis. Salin manual: <code>' + escapeHtml(addr) + '</code>', 'error', 7000);
+        showToast('⚠️ Salin manual: <code>' + escapeHtml(addr) + '</code>', 'error', 7000);
       });
     }
 
-    // ====== Toast ======
     function showToast(message, type, duration) {
       type = type || 'info';
       duration = duration || 4000;
@@ -515,23 +471,31 @@ function getHtml() {
       }, 300);
     }
 
-    // ====== Fetch & render ======
     async function loadAllEmails() {
-      const listEl = document.getElementById('emailList');
+      if (isFetching) return;
+      isFetching = true;
+      const bar = document.getElementById('loadingBar');
+      bar.classList.add('active');
       try {
-        const res = await fetch('/api/all-emails', {
-          cache: 'no-store',
+        const res = await fetch('/api/all-emails?limit=100', {
+          cache: 'default',
           credentials: 'omit'
         });
-        allEmails = await res.json();
-        applyFilter();
+        const data = await res.json();
+        const newIds = JSON.stringify(data.map(e => e.id));
+        if (newIds !== lastIds) {
+          lastIds = newIds;
+          allEmails = data;
+          applyFilter();
+        }
       } catch (err) {
-        listEl.innerHTML = '<div class="empty-state">Gagal memuat email. Coba lagi.</div>';
         console.error(err);
+      } finally {
+        isFetching = false;
+        setTimeout(() => bar.classList.remove('active'), 300);
       }
     }
 
-    // ====== Filter ======
     function setRange(range) {
       filterState.range = range;
       document.querySelectorAll('.tab').forEach(t => {
@@ -541,8 +505,7 @@ function getHtml() {
     }
     function applyFilter() {
       filterState.query = (document.getElementById('searchInput').value || '').trim().toLowerCase();
-      const filtered = filterEmails(allEmails);
-      renderEmails(filtered);
+      renderEmails(filterEmails(allEmails));
     }
     function filterEmails(emails) {
       const now = Date.now();
@@ -567,7 +530,6 @@ function getHtml() {
       });
     }
 
-    // ====== HTML sanitizer ======
     function sanitizeHtml(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const forbiddenTags = ['script','iframe','object','embed','form','img','picture','source','video','audio','track','link','meta','base','style'];
@@ -665,7 +627,10 @@ function getHtml() {
     window.addEventListener('DOMContentLoaded', () => {
       initAddress();
       loadAllEmails();
-      setInterval(loadAllEmails, 10000);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) loadAllEmails();
+      });
+      setInterval(loadAllEmails, 15000);
     });
   </script>
 </body>
