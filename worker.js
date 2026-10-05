@@ -2,6 +2,9 @@ import PostalMime from 'postal-mime';
 
 const DEFAULT_DOMAIN = 'ryy.my.id';
 
+// 28 hari dalam detik
+const EMAIL_TTL_SECONDS = 28 * 24 * 60 * 60; // 2.419.200 detik
+
 const NEAT_WORDS = [
   'mail', 'inbox', 'box', 'temp', 'user', 'hello', 'hey',
   'contact', 'info', 'admin', 'office', 'team', 'work',
@@ -79,7 +82,11 @@ export default {
 
       const ts = Date.now();
       const key = `msg:${domain}:${localPart}:${ts}:${emailObject.id}`;
-      await env.EMAIL_STORE.put(key, JSON.stringify(emailObject));
+
+      // Simpan dengan expirationTtl = 28 hari → otomatis terhapus oleh Cloudflare KV
+      await env.EMAIL_STORE.put(key, JSON.stringify(emailObject), {
+        expirationTtl: EMAIL_TTL_SECONDS
+      });
     }
   },
 
@@ -121,8 +128,16 @@ export default {
 
       const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: 1000 });
 
+      // Filter email yang lebih tua dari 28 hari (untuk berjaga-jaga
+      // jika ada entry lama sebelum fitur TTL aktif) lalu urutkan terbaru
+      const cutoffTs = Date.now() - EMAIL_TTL_SECONDS * 1000;
       const sortedKeys = list.keys
         .map(k => k.name)
+        .filter(k => {
+          const parts = k.split(':');
+          const ts = parseInt(parts[parts.length - 2], 10) || 0;
+          return ts >= cutoffTs;
+        })
         .sort((a, b) => {
           const partsA = a.split(':');
           const partsB = b.split(':');
@@ -229,9 +244,7 @@ function getHtml() {
       margin-bottom: 10px;
       font-weight: 600;
     }
-    .address-row {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    }
+    .address-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .address-value {
       font-size: 1.2rem;
       font-weight: 600;
@@ -293,6 +306,20 @@ function getHtml() {
     }
     .tab:hover { color: var(--text); }
     .tab.active { background: var(--accent); color: white; }
+
+    .info-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      background: #eef2ff;
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .info-note strong { color: var(--accent); }
 
     .email-list { display: flex; flex-direction: column; gap: 12px; }
     .email-card {
@@ -392,6 +419,10 @@ function getHtml() {
         <button class="btn btn-small" onclick="copyAddress()">📋 Salin</button>
         <button class="btn btn-small" onclick="newAddress()">⚡ Alamat Baru</button>
       </div>
+    </div>
+
+    <div class="info-note">
+      🗑️ <span>Email otomatis dihapus setelah <strong>28 hari</strong> sejak diterima.</span>
     </div>
 
     <div class="filter-bar">
