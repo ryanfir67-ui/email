@@ -2,7 +2,7 @@ import PostalMime from 'postal-mime';
 
 const DEFAULT_DOMAIN = 'ryy.my.id';
 const EMAIL_TTL_SECONDS = 28 * 24 * 60 * 60; // 28 hari
-const MAX_EMAILS = 100; // Ambil 100 email terbaru
+const MAX_EMAILS = 100;
 
 const NEAT_WORDS = [
   'mail', 'inbox', 'box', 'temp', 'user', 'hello', 'hey',
@@ -67,10 +67,9 @@ export default {
       if (parts.length < 2) continue;
       const headers = message.headers;
       
-      // Ambil subject yang sudah di-decode
       const rawSubject = parsed.subject || headers.get('subject') || '(no subject)';
       
-      // Fallback decode MIME jika masih ada sisa format =?UTF-8?...
+      // Decode MIME fallback jika diperlukan
       const cleanSubject = rawSubject.replace(/=\?[^?]+\?[BQbq]\?[^?]+\?=/g, (match) => {
         try {
           const parts = match.split('?');
@@ -138,16 +137,12 @@ export default {
     if (path === '/api/all-emails' && request.method === 'GET') {
       try {
         const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: MAX_EMAILS });
-        
-        // Ambil semua key (format baru maupun lama)
         const keyNames = list.keys.map(k => k.name);
 
-        // Tarik semua isi email secara paralel
         const results = await Promise.all(
           keyNames.map(k => env.EMAIL_STORE.get(k, 'json'))
         );
 
-        // Buang jika ada yang null (sudah terhapus TTL)
         const emails = results.filter(r => r !== null && r.id);
 
         return new Response(JSON.stringify(emails), {
@@ -463,7 +458,6 @@ function getHtml() {
       return w + '-' + n + '@' + DOMAIN;
     }
 
-    // Perbaikan: Bungkus localStorage dengan try-catch agar tidak crash
     function initAddress() {
       let addr = '';
       try {
@@ -558,12 +552,10 @@ function getHtml() {
           saveCache(data);
           applyFilter();
         } else if (allEmails.length === 0) {
-          // Jika kosong dari awal
           applyFilter();
         }
       } catch (err) {
         console.error('Fetch error:', err);
-        // Jika fetch gagal, pastikan UI tidak tertahan di "Memuat..."
         if (allEmails.length === 0) {
           document.getElementById('emailList').innerHTML =
             '<div class="empty-state">Gagal memuat email. Periksa koneksi internet Anda.</div>';
@@ -612,10 +604,10 @@ function getHtml() {
       });
     }
 
-    // Mengubah teks biasa menjadi link yang bisa diklik
+    // PERBAIKAN ERROR REGEX: Menggunakan [/]{2} dan \\s agar aman dari template literal
     function linkifyText(text) {
       const escaped = escapeHtml(text);
-      return escaped.replace(/(https?:\/\/[^\s<]+)/g, function(url) {
+      return escaped.replace(/(https?:[/]{2}[^\\s<]+)/g, function(url) {
         return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
       });
     }
@@ -720,7 +712,6 @@ function getHtml() {
       }
     }
 
-    // Pembungkus utama untuk mencegah crash
     window.addEventListener('DOMContentLoaded', () => {
       try { initAddress(); } catch (e) { console.error('initAddress error', e); }
       
@@ -733,7 +724,6 @@ function getHtml() {
         }
       } catch (e) { console.error('Cache error', e); }
 
-      // Jalankan fetch
       loadAllEmails();
 
       document.addEventListener('visibilitychange', () => {
