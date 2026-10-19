@@ -48,7 +48,7 @@ export default {
       const parser = new PostalMime();
       parsed = await parser.parse(rawBuffer);
     } catch (e) {
-      parsed = { text: '', html: '' };
+      parsed = { text: '', html: '', subject: '' };
     }
 
     let text = parsed.text || '';
@@ -66,22 +66,37 @@ export default {
       const parts = toAddress.split('@');
       if (parts.length < 2) continue;
       const headers = message.headers;
+      
+      // Ambil subject dari parsed (postal-mime men-decode format MIME otomatis)
+      // Jika kosong, fallback ke header mentah
+      const rawSubject = parsed.subject || headers.get('subject') || '(no subject)';
+      
+      // Bersihkan sisa-sisa format encoded-word jika ada yang lolos
+      const cleanSubject = rawSubject.replace(/=\?[^?]+\?[BQbq]\?[^?]+\?=/g, (match) => {
+        try {
+          // Basic fallback decode untuk Q-encoding jika postal-mime gagal
+          const parts = match.split('?');
+          if (parts[2].toUpperCase() === 'B') {
+            return decodeURIComponent(escape(atob(parts[3])));
+          }
+        } catch (e) {}
+        return match;
+      });
+
       const from = headers.get('from') || 'Unknown';
-      const subject = headers.get('subject') || '(no subject)';
       const date = headers.get('date') || new Date().toISOString();
 
       const emailObject = {
         id: crypto.randomUUID(),
         from,
         to: toAddress,
-        subject,
+        subject: cleanSubject,
         date,
         text,
         html,
         raw: text || html ? '' : new TextDecoder().decode(rawBuffer)
       };
 
-      // Key: msg:INVTS:UUID  → KV list() otomatis urut terbaru dulu
       const key = `msg:${invertedTs(Date.now())}:${emailObject.id}`;
       await env.EMAIL_STORE.put(key, JSON.stringify(emailObject), {
         expirationTtl: EMAIL_TTL_SECONDS
@@ -122,12 +137,8 @@ export default {
       });
     }
 
-    // ====== API: daftar email (cepat) ======
     if (path === '/api/all-emails' && request.method === 'GET') {
-      // 1. list() langsung dibatasi 50 → tidak perlu sort → cepat
       const list = await env.EMAIL_STORE.list({ prefix: 'msg:', limit: MAX_EMAILS });
-
-      // 2. Filter hanya key format baru (msg:13-digit:uuid)
       const keyNames = [];
       for (const k of list.keys) {
         if (/^msg:\d{13}:[0-9a-f-]{36}$/i.test(k.name)) {
@@ -135,11 +146,9 @@ export default {
         }
       }
 
-      // 3. Ambil semua value secara paralel dengan type json (tanpa parse manual)
       const results = await Promise.all(
         keyNames.map(k => env.EMAIL_STORE.get(k, 'json'))
       );
-
       const emails = results.filter(r => r !== null);
 
       return new Response(JSON.stringify(emails), {
@@ -303,6 +312,8 @@ function getHtml() {
       max-height: 400px; overflow-y: auto; cursor: auto;
     }
     .email-card.open .email-content { display: block; }
+    
+    /* Perbaikan Tampilan Teks & Link */
     .email-content pre {
       white-space: pre-wrap; font-family: monospace;
       font-size: 0.85rem; background: #f9fafb;
@@ -314,6 +325,16 @@ function getHtml() {
       user-select: text; word-break: break-word;
     }
     .email-html * { max-width: 100%; }
+    .email-html a, .email-content pre a {
+      color: var(--accent) !important;
+      text-decoration: underline !important;
+      cursor: pointer !important;
+      word-break: break-all;
+    }
+    .email-html a:hover, .email-content pre a:hover {
+      color: var(--accent-hover) !important;
+    }
+
     .empty-state {
       text-align: center; padding: 60px 20px;
       background: var(--card-bg); border: 1px dashed var(--border);
@@ -477,7 +498,6 @@ function getHtml() {
       setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
     }
 
-    // ====== Cache ======
     function loadCache() {
       try {
         const raw = sessionStorage.getItem(CACHE_KEY);
@@ -493,7 +513,6 @@ function getHtml() {
       } catch (e) {}
     }
 
-    // ====== Load (cache dulu, fetch di background) ======
     async function loadAllEmails() {
       if (isFetching) return;
       isFetching = true;
@@ -558,23 +577,42 @@ function getHtml() {
       });
     }
 
+    // Konversi teks biasa menjadi HTML dengan Link yang bisa diklik
+    function linkifyText(text) {
+      const escaped = escapeHtml(text);
+      // Regex untuk menangkap http:// atau https://
+      return escaped.replace(/(https?:\/\/[^\s<]+)/g, function(url) {
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+      });
+    }
+
     function sanitizeHtml(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
+      // Tag yang tetap dilarang untuk keamanan / mencegah loading eksternal
       const forbiddenTags = ['script','iframe','object','embed','form','img','picture','source','video','audio','track','link','meta','base','style'];
       forbiddenTags.forEach(tag => doc.querySelectorAll(tag).forEach(el => el.remove()));
+      
       doc.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
           const name = attr.name.toLowerCase();
-          if (name.startsWith('on')) el.removeAttribute(attr.name);
-          if (['src','srcset','href','background','action','formaction'].includes(name)) {
-            if (name === 'href' && el.tagName.toLowerCase() === 'a') {
-              const linkText = el.textContent || '';
-              const url = attr.value || '';
-              const replacement = document.createTextNode(linkText + (url ? ' (' + url + ')' : ''));
-              el.parentNode.replaceChild(replacement, el);
+          // Hapus event handler (onclick, dll)
+          if (name.startsWith('on')) {
+            el.removeAttribute(attr.name);
+          }
+          // Tangani link <a>
+          if (name === 'href') {
+            const url = attr.value || '';
+            if (url.match(/^(https?:|mailto:)/i)) {
+              el.setAttribute('href', url);
+              el.setAttribute('target', '_blank');
+              el.setAttribute('rel', 'noopener noreferrer');
             } else {
-              el.removeAttribute(attr.name);
+              el.removeAttribute('href');
             }
+          }
+          // Hapus atribut lain yang memicu request
+          if (['src','srcset','background','action','formaction'].includes(name)) {
+            el.removeAttribute(attr.name);
           }
         });
       });
@@ -600,15 +638,19 @@ function getHtml() {
       emails.forEach(email => {
         const isOpen = (openEmailId === email.id) ? ' open' : '';
         let contentHtml = '';
+        
+        // Render HTML atau Text
         if (email.html) {
           contentHtml = '<div class="email-html">' + sanitizeHtml(email.html) + '</div>';
         } else if (email.text) {
-          contentHtml = '<pre>' + escapeHtml(email.text) + '</pre>';
+          // Gunakan linkifyText agar URL di teks biasa bisa diklik
+          contentHtml = '<pre>' + linkifyText(email.text) + '</pre>';
         } else if (email.raw) {
-          contentHtml = '<pre>' + escapeHtml(email.raw) + '</pre>';
+          contentHtml = '<pre>' + linkifyText(email.raw) + '</pre>';
         } else {
           contentHtml = '<p style="color:#999;">Tidak ada konten yang dapat ditampilkan.</p>';
         }
+        
         const dateStr = formatDate(email.date);
         html += \`
           <div class="email-card\${isOpen}" data-id="\${email.id}" onclick="toggleEmail(event, this)">
@@ -650,18 +692,13 @@ function getHtml() {
 
     window.addEventListener('DOMContentLoaded', () => {
       initAddress();
-
-      // 1. Tampilkan cache dulu → instan
       const cached = loadCache();
       if (cached) {
         allEmails = cached;
         lastIds = JSON.stringify(cached.map(e => e.id));
         applyFilter();
       }
-
-      // 2. Fetch data terbaru di background
       loadAllEmails();
-
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) loadAllEmails();
       });
